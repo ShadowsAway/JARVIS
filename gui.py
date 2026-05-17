@@ -73,10 +73,11 @@ class JarvisGUI:
     """
 
     # ── Window geometry ───────────────────────────────────────────────────────
-    WIN_W = 1000
-    WIN_H = 700
-    LEFT_W = 350
-    RIGHT_W = 650  # WIN_W - LEFT_W
+    WIN_W  = 1380
+    WIN_H  = 720
+    LEFT_W = 340
+    RIGHT_W = 560
+    CMD_W  = 480  # commands panel
 
     # ── Animation constants ───────────────────────────────────────────────────
     ORB_SIZE = 260           # diameter of the outer bounding box
@@ -100,6 +101,7 @@ class JarvisGUI:
         self._build_window()
         self._build_left_panel()
         self._build_right_panel()
+        self._build_commands_panel()
         self._start_animations()
         self._start_stat_updater()
 
@@ -115,16 +117,17 @@ class JarvisGUI:
         self.root.configure(fg_color=cfg.BG)
         self.root.protocol("WM_DELETE_WINDOW", self._on_close)
 
-        # Outer grid: two columns
+        # Outer grid: three columns
         self.root.grid_columnconfigure(0, minsize=self.LEFT_W)
         self.root.grid_columnconfigure(1, weight=1)
+        self.root.grid_columnconfigure(2, minsize=self.CMD_W)
         self.root.grid_rowconfigure(0, weight=1)
 
         # ── Title bar ─────────────────────────────────────────────────────────
         title_frame = ctk.CTkFrame(
             self.root, fg_color=cfg.BG, height=40, corner_radius=0
         )
-        title_frame.grid(row=0, column=0, columnspan=2, sticky="new")
+        title_frame.grid(row=0, column=0, columnspan=3, sticky="new")
 
         ctk.CTkLabel(
             title_frame,
@@ -144,7 +147,7 @@ class JarvisGUI:
         sep = ctk.CTkFrame(
             self.root, fg_color=cfg.DIM, height=1, corner_radius=0
         )
-        sep.grid(row=0, column=0, columnspan=2, sticky="sew", pady=(38, 0))
+        sep.grid(row=0, column=0, columnspan=3, sticky="sew", pady=(38, 0))
 
     # ─────────────────────────────────────────────────────────────────────────
     # Left panel
@@ -429,7 +432,7 @@ class JarvisGUI:
             font=ctk.CTkFont(family="Courier New", size=13),
             text_color=cfg.TEXT,
             anchor="w",
-            wraplength=560,
+            wraplength=440,
         )
         self.recognized_label.grid(row=1, column=0, padx=14, pady=(2, 6), sticky="w")
 
@@ -452,7 +455,7 @@ class JarvisGUI:
             font=ctk.CTkFont(family="Courier New", size=12),
             text_color=cfg.ACCENT,
             anchor="w",
-            wraplength=560,
+            wraplength=440,
         )
         self.last_cmd_label.grid(row=1, column=0, padx=14, pady=(2, 6), sticky="w")
 
@@ -534,6 +537,170 @@ class JarvisGUI:
         # Seed the log with a startup message
         self.add_log(f"{cfg.APP_NAME} v{cfg.VERSION} iniciado — sistemas en línea.", "success")
         self.add_log('Mantén pulsado "0" y habla en español.', "dim")
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # Commands panel
+    # ─────────────────────────────────────────────────────────────────────────
+
+    # All active commands grouped by category.
+    # Format: (category_title, accent_color, [(icon, description, example), ...])
+    _COMMANDS = [
+        ("SISTEMA", "#ff3355", [
+            ("⏻", "Apagar el ordenador",   "apaga el ordenador / apaga el pc"),
+            ("↺", "Reiniciar el equipo",    "reinicia el ordenador / reinicia el pc"),
+            ("◌", "Suspender / sleep",      "pon el ordenador a dormir / suspender"),
+        ]),
+        ("PROGRAMAS", "#00d4ff", [
+            ("▶", "Abrir cualquier programa", "abre chrome / ejecuta discord / lanza spotify"),
+            ("✕", "Cerrar un programa",       "cierra chrome / termina discord / para spotify"),
+        ]),
+        ("WHATSAPP", "#25d366", [
+            ("⊕", "Abrir WhatsApp en Chrome",  "abre whatsapp en chrome / abre whatsapp web"),
+            ("✉", "Enviar mensaje",
+             "manda un mensaje a Nil que diga Hola\n"
+             "     envía a Ana diciendo Buenas\n"
+             "     dile a Juan por whatsapp que llega tarde"),
+        ]),
+        ("YOUTUBE", "#ff0000", [
+            ("♫", "Reproducir música/vídeo",
+             "pon música phonk en youtube\n"
+             "     reproduce lofi en youtube\n"
+             "     quiero escuchar reggaeton"),
+        ]),
+        ("NAVEGADOR WEB", "#4285f4", [
+            ("⊞", "Abrir una web",
+             "abre youtube / ve a google / entra en twitch\n"
+             "     abre netflix.com"),
+        ]),
+        ("VOLUMEN", "#ffaa00", [
+            ("▲", "Subir volumen",   "sube el volumen / más volumen"),
+            ("▼", "Bajar volumen",   "baja el volumen / menos sonido"),
+            ("✕", "Silenciar",       "silencia / quita el sonido / mute"),
+        ]),
+        ("PANTALLA", "#00ff88", [
+            ("⬛", "Captura de pantalla",
+             "haz una captura / pantallazo / screenshot"),
+        ]),
+        ("ARCHIVOS", "#c8e8ff", [
+            ("⇄", "Mover archivo",
+             "mueve el archivo datos.txt a C:\\Backup"),
+        ]),
+        ("INFORMACIÓN", "#888888", [
+            ("◷", "Hora actual",      "qué hora es / dime la hora"),
+            ("▦", "Fecha de hoy",     "qué día es hoy / dime la fecha"),
+            ("⊙", "Estado del sistema", "cómo está el sistema / uso de cpu"),
+            ("?", "Ayuda",            "ayuda / qué puedes hacer / comandos"),
+        ]),
+    ]
+
+    def _build_commands_panel(self) -> None:
+        # Vertical separator
+        sep = ctk.CTkFrame(self.root, fg_color=cfg.DIM, width=1, corner_radius=0)
+        sep.grid(row=0, column=1, sticky="nse", pady=(45, 0))
+
+        outer = ctk.CTkFrame(
+            self.root, fg_color="#060c18", width=self.CMD_W, corner_radius=0
+        )
+        outer.grid(row=0, column=2, sticky="nsew", padx=0, pady=(45, 0))
+        outer.grid_propagate(False)
+        outer.grid_rowconfigure(1, weight=1)
+        outer.grid_columnconfigure(0, weight=1)
+
+        # Header
+        hdr = ctk.CTkFrame(outer, fg_color="#040810", corner_radius=0, height=32)
+        hdr.grid(row=0, column=0, sticky="ew")
+        hdr.grid_propagate(False)
+        ctk.CTkLabel(
+            hdr,
+            text="◈  COMANDOS DISPONIBLES",
+            font=ctk.CTkFont(family="Courier New", size=10, weight="bold"),
+            text_color=cfg.ACCENT,
+            anchor="w",
+        ).pack(side="left", padx=12, pady=6)
+        ctk.CTkLabel(
+            hdr,
+            text="ACTIVO",
+            font=ctk.CTkFont(family="Courier New", size=9),
+            text_color=cfg.SUCCESS,
+            anchor="e",
+        ).pack(side="right", padx=12, pady=6)
+
+        # Scrollable content
+        scroll = ctk.CTkScrollableFrame(
+            outer,
+            fg_color="#060c18",
+            scrollbar_button_color=cfg.DIM,
+            scrollbar_button_hover_color=cfg.ACCENT2,
+            corner_radius=0,
+        )
+        scroll.grid(row=1, column=0, sticky="nsew", padx=0, pady=0)
+        scroll.grid_columnconfigure(0, weight=1)
+
+        for cat_title, cat_color, commands in self._COMMANDS:
+            # Category header
+            cat_frame = ctk.CTkFrame(scroll, fg_color="#040810", corner_radius=4)
+            cat_frame.pack(fill="x", padx=8, pady=(8, 2))
+
+            ctk.CTkLabel(
+                cat_frame,
+                text=f"▸  {cat_title}",
+                font=ctk.CTkFont(family="Courier New", size=10, weight="bold"),
+                text_color=cat_color,
+                anchor="w",
+            ).pack(side="left", padx=10, pady=4)
+
+            # Status dot
+            ctk.CTkLabel(
+                cat_frame,
+                text="●",
+                font=ctk.CTkFont(size=8),
+                text_color=cfg.SUCCESS,
+                anchor="e",
+            ).pack(side="right", padx=10, pady=4)
+
+            # Command rows
+            for icon, desc, example in commands:
+                row = ctk.CTkFrame(scroll, fg_color="#080f1e", corner_radius=4)
+                row.pack(fill="x", padx=8, pady=1)
+                row.grid_columnconfigure(1, weight=1)
+
+                # Icon
+                ctk.CTkLabel(
+                    row,
+                    text=icon,
+                    font=ctk.CTkFont(family="Courier New", size=13),
+                    text_color=cat_color,
+                    width=28,
+                    anchor="center",
+                ).grid(row=0, column=0, rowspan=2, padx=(8, 4), pady=6, sticky="ns")
+
+                # Description
+                ctk.CTkLabel(
+                    row,
+                    text=desc,
+                    font=ctk.CTkFont(family="Courier New", size=10, weight="bold"),
+                    text_color=cfg.TEXT,
+                    anchor="w",
+                ).grid(row=0, column=1, padx=4, pady=(5, 0), sticky="w")
+
+                # Example (dimmer, italic-style via smaller font)
+                ctk.CTkLabel(
+                    row,
+                    text=example,
+                    font=ctk.CTkFont(family="Courier New", size=9),
+                    text_color="#3a6080",
+                    anchor="w",
+                    wraplength=self.CMD_W - 70,
+                    justify="left",
+                ).grid(row=1, column=1, padx=4, pady=(0, 5), sticky="w")
+
+        # Bottom hint
+        ctk.CTkLabel(
+            outer,
+            text='[ Mantén "0" · habla · suelta ]',
+            font=ctk.CTkFont(family="Courier New", size=9),
+            text_color=cfg.DIM,
+        ).grid(row=2, column=0, pady=6)
 
     # ─────────────────────────────────────────────────────────────────────────
     # Animation loop
