@@ -59,6 +59,9 @@ class JARVIS:
                 "error",
             )
 
+        # ── Text command callback ─────────────────────────────────────────────
+        self.gui.set_command_callback(self._on_speech_result)
+
         # ── Keyboard hooks ────────────────────────────────────────────────────
         self._key_held: bool = False
         self._setup_hotkey()

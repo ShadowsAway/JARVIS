@@ -220,20 +220,53 @@ class Actions:
     # BROWSER / WEB
     # ─────────────────────────────────────────────────────────────────────────
 
-    def _get_driver(self, profile_dir: str | None = None) -> webdriver.Chrome | None:
+    def _open_url_in_existing_chrome(self, url: str) -> bool:
         """
-        Create a new Chrome WebDriver instance.
-        If *profile_dir* is given the session is persistent (useful for WhatsApp).
+        Open *url* in the user's existing Chrome window (with their real session).
+        Uses 'start chrome URL' on Windows which reuses the running instance.
+        Falls back to webbrowser if Chrome is not found.
+        """
+        if platform.system() == "Windows":
+            try:
+                # This opens a new tab in the already-running Chrome
+                subprocess.Popen(f'start chrome "{url}"', shell=True)
+                return True
+            except Exception:
+                pass
+            # Try common Chrome paths
+            chrome_paths = [
+                os.path.join(os.environ.get("ProgramFiles", ""), "Google", "Chrome", "Application", "chrome.exe"),
+                os.path.join(os.environ.get("ProgramFiles(x86)", ""), "Google", "Chrome", "Application", "chrome.exe"),
+                os.path.join(os.environ.get("LOCALAPPDATA", ""), "Google", "Chrome", "Application", "chrome.exe"),
+            ]
+            for path in chrome_paths:
+                if os.path.isfile(path):
+                    try:
+                        subprocess.Popen([path, url])
+                        return True
+                    except Exception:
+                        pass
+        webbrowser.open(url)
+        return True
+
+    def _get_whatsapp_driver(self) -> webdriver.Chrome | None:
+        """
+        Create a Chrome WebDriver with the JARVIS WhatsApp profile.
+        This profile persists between runs — QR scan only needed once.
         """
         try:
+            profile_path = os.path.abspath(cfg.WHATSAPP_PROFILE)
+            os.makedirs(profile_path, exist_ok=True)
+
             options = webdriver.ChromeOptions()
-            if profile_dir:
-                profile_path = os.path.abspath(profile_dir)
-                os.makedirs(profile_path, exist_ok=True)
-                options.add_argument(f"--user-data-dir={profile_path}")
+            options.add_argument(f"--user-data-dir={profile_path}")
+            options.add_argument("--profile-directory=Default")
             options.add_argument("--start-maximized")
             options.add_argument("--no-sandbox")
             options.add_argument("--disable-dev-shm-usage")
+            options.add_argument("--disable-session-crashed-bubble")
+            options.add_argument("--no-first-run")
+            options.add_argument("--no-default-browser-check")
             options.add_experimental_option("excludeSwitches", ["enable-automation"])
             options.add_experimental_option("useAutomationExtension", False)
 
@@ -244,17 +277,14 @@ class Actions:
             self.log(f"Error ChromeDriver: {exc}", "error")
             return None
 
-    def open_website(self, site: str) -> webdriver.Chrome | None:
-        """Open *site* in Chrome, resolving known aliases first."""
+    def open_website(self, site: str) -> None:
+        """Open *site* in the user's existing Chrome (with their real session)."""
         site_lower = site.lower().strip()
-
-        # Resolve known aliases
         url: str | None = None
         for key, val in cfg.WEBSITES.items():
             if key in site_lower:
                 url = val
                 break
-
         if not url:
             if site_lower.startswith("http"):
                 url = site_lower
@@ -262,26 +292,14 @@ class Actions:
                 url = f"https://{site_lower}"
             else:
                 url = f"https://www.google.com/search?q={site_lower.replace(' ', '+')}"
-
-        try:
-            driver = self._get_driver()
-            if driver:
-                driver.get(url)
-                self.speak(f"Abriendo {site}.")
-                self.log(f"Web abierta: {url}")
-                return driver
-        except Exception as exc:
-            self.log(f"Error abriendo web: {exc}", "warning")
-
-        # Fallback to system default browser
-        webbrowser.open(url)
-        self.speak(f"Abriendo {site} en el navegador.")
-        return None
+        self._open_url_in_existing_chrome(url)
+        self.speak(f"Abriendo {site}.")
+        self.log(f"Web abierta: {url}")
 
     def open_whatsapp_chrome(self) -> webdriver.Chrome | None:
-        """Open WhatsApp Web in Chrome with a persistent profile."""
+        """Open WhatsApp Web with the persistent JARVIS WhatsApp profile."""
         try:
-            driver = self._get_driver(cfg.WHATSAPP_PROFILE)
+            driver = self._get_whatsapp_driver()
             if driver:
                 driver.get("https://web.whatsapp.com")
                 self.speak(
@@ -293,9 +311,8 @@ class Actions:
                 return driver
         except Exception as exc:
             self.log(f"Error abriendo WhatsApp: {exc}", "error")
-
         webbrowser.open("https://web.whatsapp.com")
-        self.speak("Abriendo WhatsApp Web en el navegador predeterminado.")
+        self.speak("Abriendo WhatsApp en el navegador.")
         return None
 
     def send_whatsapp_message(self, contact: str, message: str) -> bool:
@@ -307,7 +324,7 @@ class Actions:
             with self._driver_lock:
                 # Ensure we have an active driver pointing at WhatsApp
                 if self.chrome_driver is None:
-                    driver = self._get_driver(cfg.WHATSAPP_PROFILE)
+                    driver = self._get_whatsapp_driver()
                     if not driver:
                         self.speak("No pude abrir Chrome para WhatsApp.")
                         return False
@@ -408,34 +425,13 @@ class Actions:
             return False
 
     def play_youtube(self, query: str) -> bool:
-        """Search *query* on YouTube and click the first video result."""
+        """Open YouTube search in the user's existing Chrome (with their session)."""
         search_url = (
             f"https://www.youtube.com/results?search_query={query.replace(' ', '+')}"
         )
-        try:
-            driver = self._get_driver()
-            if driver:
-                driver.get(search_url)
-                time.sleep(3)
-                try:
-                    wait = WebDriverWait(driver, 10)
-                    first_video = wait.until(
-                        EC.presence_of_element_located(
-                            (By.CSS_SELECTOR, "ytd-video-renderer #video-title")
-                        )
-                    )
-                    first_video.click()
-                    self.speak(f"Reproduciendo {query} en YouTube.")
-                except TimeoutException:
-                    self.speak(f"Buscando {query} en YouTube.")
-                self.log(f"YouTube: {query}")
-                return True
-        except Exception as exc:
-            self.log(f"Error YouTube: {exc}", "warning")
-
-        # Fallback
-        webbrowser.open(search_url)
+        self._open_url_in_existing_chrome(search_url)
         self.speak(f"Buscando {query} en YouTube.")
+        self.log(f"YouTube: {query}")
         return True
 
     # ─────────────────────────────────────────────────────────────────────────

@@ -86,6 +86,52 @@ WEBSITES: dict[str, str] = {
     "whatsapp":   "https://web.whatsapp.com",
 }
 
+# ── Phonetic aliases ──────────────────────────────────────────────────────────
+# Vosk (Spanish model) transcribes English words phonetically in Spanish.
+# Map each likely transcription → correct word used in patterns/PROGRAMS.
+PHONETIC_ALIASES: dict[str, str] = {
+    # Chrome
+    "cromo": "chrome",  "crome": "chrome",  "krome": "chrome",  "chrom": "chrome",
+    # Phonk
+    "fon": "phonk",     "fonk": "phonk",    "funk": "phonk",    "fanc": "phonk",
+    # YouTube
+    "yutu": "youtube",  "yutub": "youtube", "utub": "youtube",  "jutub": "youtube",
+    "iutub": "youtube",
+    # WhatsApp
+    "wasap": "whatsapp",   "guasap": "whatsapp",  "uasap": "whatsapp",
+    "uatsap": "whatsapp",  "whasap": "whatsapp",  "watsap": "whatsapp",
+    # Spotify
+    "espotifai": "spotify", "spotifai": "spotify", "espotify": "spotify",
+    "spotifi": "spotify",   "espotifi": "spotify",
+    # Discord
+    "discor": "discord",  "diskor": "discord",  "discort": "discord",
+    # Netflix
+    "netflis": "netflix",  "netflics": "netflix",  "netflic": "netflix",
+    # Twitch
+    "tuich": "twitch",  "tuit": "twitch",  "tuitch": "twitch",
+    # Steam
+    "estim": "steam",  "estam": "steam",  "estean": "steam",
+    # Fortnite
+    "fortnait": "fortnite",  "fortnai": "fortnite",  "fortnite": "fortnite",
+    # Instagram
+    "instragram": "instagram",  "instragam": "instagram",  "instag": "instagram",
+    # TikTok
+    "ticto": "tiktok",  "tikto": "tiktok",  "tic toc": "tiktok",
+    # Minecraft
+    "maincraf": "minecraft",  "mainkraf": "minecraft",
+    # Telegram
+    "telegran": "telegram",  "telagram": "telegram",
+}
+
+# Multi-word phonetic aliases (applied as substring replacements)
+PHONETIC_MULTIWORD: dict[str, str] = {
+    "yu tu":    "youtube",
+    "you tube": "youtube",
+    "wats ap":  "whatsapp",
+    "what sap": "whatsapp",
+    "es pot if ai": "spotify",
+}
+
 # ── GUI Color Palette (Iron Man / HUD aesthetic) ───────────────────────────────
 BG       = "#050a14"   # Deep space black-blue  (background)
 ACCENT   = "#00d4ff"   # Electric cyan           (primary accent)

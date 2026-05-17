@@ -88,6 +88,7 @@ class JarvisGUI:
 
     def __init__(self) -> None:
         self._state: StateType = "idle"
+        self._on_command_callback = None
         self._arc1_angle: float = 0.0
         self._arc2_angle: float = 0.0
         self._scan_y: float = 0.0
@@ -391,6 +392,7 @@ class JarvisGUI:
         self.right.grid(row=0, column=1, sticky="nsew", padx=(1, 0), pady=(45, 0))
         self.right.grid_columnconfigure(0, weight=1)
         self.right.grid_rowconfigure(3, weight=1)  # log gets the extra space
+        self.right.grid_rowconfigure(4, minsize=52) # text input row
 
         # ── Section: Active Listening indicator ───────────────────────────────
         top_bar = ctk.CTkFrame(self.right, fg_color="#050a14", corner_radius=6)
@@ -474,6 +476,20 @@ class JarvisGUI:
             text_color=cfg.ACCENT2,
             anchor="w",
         ).pack(side="left", padx=10, pady=4)
+        ctk.CTkButton(
+            log_header,
+            text="LIMPIAR",
+            width=62,
+            height=22,
+            font=ctk.CTkFont(family="Courier New", size=8, weight="bold"),
+            fg_color="#0a1828",
+            hover_color="#1a2838",
+            text_color=cfg.DIM,
+            border_width=1,
+            border_color=cfg.DIM,
+            corner_radius=3,
+            command=self._clear_log,
+        ).pack(side="right", padx=10, pady=4)
 
         self.log_text = ctk.CTkTextbox(
             log_frame,
@@ -494,11 +510,42 @@ class JarvisGUI:
         inner_text.tag_configure("error",   foreground=cfg.ERROR)
         inner_text.tag_configure("dim",     foreground=cfg.DIM)
 
+        # ── Section: Text command input ───────────────────────────────────────
+        input_frame = ctk.CTkFrame(self.right, fg_color="#050a14", corner_radius=6)
+        input_frame.grid(row=4, column=0, sticky="ew", padx=12, pady=(4, 2))
+        input_frame.grid_columnconfigure(0, weight=1)
+
+        self.cmd_entry = ctk.CTkEntry(
+            input_frame,
+            placeholder_text='Escribe un comando y pulsa Enter  (ej: "abre chrome")',
+            font=ctk.CTkFont(family="Courier New", size=11),
+            fg_color="#030810",
+            border_color=cfg.DIM,
+            text_color=cfg.TEXT,
+            placeholder_text_color=cfg.DIM,
+            height=32,
+        )
+        self.cmd_entry.grid(row=0, column=0, padx=(10, 4), pady=8, sticky="ew")
+        self.cmd_entry.bind("<Return>", self._on_text_command)
+
+        ctk.CTkButton(
+            input_frame,
+            text="▶",
+            width=36,
+            height=32,
+            font=ctk.CTkFont(size=14),
+            fg_color=cfg.ACCENT2,
+            hover_color=cfg.ACCENT,
+            text_color="#ffffff",
+            corner_radius=4,
+            command=lambda: self._on_text_command(None),
+        ).grid(row=0, column=1, padx=(0, 10), pady=8)
+
         # ── Section: System stats bar ─────────────────────────────────────────
         stats_frame = ctk.CTkFrame(
             self.right, fg_color="#030810", height=34, corner_radius=0
         )
-        stats_frame.grid(row=4, column=0, sticky="ew", padx=0, pady=(4, 0))
+        stats_frame.grid(row=5, column=0, sticky="ew", padx=0, pady=(2, 0))
         stats_frame.grid_columnconfigure((0, 1, 2, 3), weight=1)
         stats_frame.grid_propagate(False)
 
@@ -866,6 +913,31 @@ class JarvisGUI:
                 text_color=cfg.ACCENT if text else cfg.DIM,
             )
         self.root.after(0, _update)
+
+    def set_command_callback(self, callback) -> None:
+        """Register the function to call when the user submits a text command."""
+        self._on_command_callback = callback
+
+    def _on_text_command(self, event) -> None:
+        """Called when user presses Enter or clicks ▶ in the text input."""
+        text = self.cmd_entry.get().strip()
+        if not text:
+            return
+        self.cmd_entry.delete(0, "end")
+        self.add_log(f'Comando escrito: "{text}"', "info")
+        if self._on_command_callback:
+            import threading
+            threading.Thread(
+                target=self._on_command_callback, args=(text,), daemon=True
+            ).start()
+
+    def _clear_log(self) -> None:
+        """Clear all entries from the activity log."""
+        def _do_clear():
+            self.log_text.configure(state="normal")
+            self.log_text._textbox.delete("1.0", "end")
+            self.log_text.configure(state="disabled")
+        self.root.after(0, _do_clear)
 
     # ─────────────────────────────────────────────────────────────────────────
     # Helpers

@@ -13,16 +13,28 @@ from rapidfuzz import fuzz, process as fuzz_process
 
 def normalize(text: str) -> str:
     """
-    Lowercase, strip diacritics, collapse whitespace, remove punctuation.
-    All regex patterns below are written against normalised strings.
+    Lowercase, strip diacritics, collapse whitespace, remove punctuation,
+    then apply phonetic aliases so Vosk mispronunciations are corrected.
     """
     text = text.lower().strip()
-    # Decompose unicode (é → e + combining accent) then drop combining marks
     text = unicodedata.normalize("NFD", text)
     text = "".join(ch for ch in text if unicodedata.category(ch) != "Mn")
     text = re.sub(r"[^\w\s]", " ", text)
     text = re.sub(r"\s+", " ", text).strip()
+    text = _apply_phonetic_aliases(text)
     return text
+
+
+def _apply_phonetic_aliases(text: str) -> str:
+    """Replace phonetically misspelled English words with correct forms."""
+    import config as _cfg
+    # Multi-word first (longer matches take priority)
+    for wrong, right in _cfg.PHONETIC_MULTIWORD.items():
+        text = text.replace(wrong, right)
+    # Single-word aliases
+    words = text.split()
+    words = [_cfg.PHONETIC_ALIASES.get(w, w) for w in words]
+    return " ".join(words)
 
 
 # ── Intent pattern definitions ────────────────────────────────────────────────
