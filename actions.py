@@ -100,8 +100,25 @@ class Actions:
         # 1. Exact / substring match against known aliases
         exe = self._resolve_program_name(name_lower)
 
-        # 2. Try to launch via PATH / shell
-        if exe:
+        if exe and platform.system() == "Windows":
+            # On Windows use 'start' — works for PATH programs, registered apps
+            # and apps like Chrome that aren't in PATH but are registered.
+            for cmd in (
+                f'start "" "{exe}"',   # quoted exe (full path or registered name)
+                f'start "" {exe}',     # unquoted
+                exe,                   # direct last resort
+            ):
+                try:
+                    ret = subprocess.Popen(cmd, shell=True)
+                    # Small delay then check if process started (start always
+                    # returns 0, so we just trust it and log)
+                    self.speak(f"Abriendo {program_name}.")
+                    self.log(f"Programa iniciado: {exe}")
+                    return True
+                except Exception:
+                    continue
+
+        elif exe:  # Linux / Mac
             try:
                 subprocess.Popen(exe, shell=True)
                 self.speak(f"Abriendo {program_name}.")
@@ -110,12 +127,12 @@ class Actions:
             except Exception as exc:
                 self.log(f"Error abriendo {exe}: {exc}", "warning")
 
-        # 3. Search common Windows install directories
+        # 2. Search common Windows install directories for the .exe
         if platform.system() == "Windows":
             found_path = self._find_program_windows(name_lower)
             if found_path:
                 try:
-                    subprocess.Popen(f'"{found_path}"', shell=True)
+                    os.startfile(found_path)
                     self.speak(f"Abriendo {program_name}.")
                     self.log(f"Ejecutable encontrado: {found_path}")
                     return True
@@ -296,24 +313,11 @@ class Actions:
         self.speak(f"Abriendo {site}.")
         self.log(f"Web abierta: {url}")
 
-    def open_whatsapp_chrome(self) -> webdriver.Chrome | None:
-        """Open WhatsApp Web with the persistent JARVIS WhatsApp profile."""
-        try:
-            driver = self._get_whatsapp_driver()
-            if driver:
-                driver.get("https://web.whatsapp.com")
-                self.speak(
-                    "Abriendo WhatsApp. Si es la primera vez, escanea el código QR."
-                )
-                self.log("WhatsApp Web abierto.")
-                with self._driver_lock:
-                    self.chrome_driver = driver
-                return driver
-        except Exception as exc:
-            self.log(f"Error abriendo WhatsApp: {exc}", "error")
-        webbrowser.open("https://web.whatsapp.com")
-        self.speak("Abriendo WhatsApp en el navegador.")
-        return None
+    def open_whatsapp_chrome(self) -> None:
+        """Open WhatsApp Web as a new tab in the user's existing Chrome."""
+        self._open_url_in_existing_chrome("https://web.whatsapp.com")
+        self.speak("Abriendo WhatsApp en Chrome.")
+        self.log("WhatsApp Web abierto en Chrome existente.")
 
     def send_whatsapp_message(self, contact: str, message: str) -> bool:
         """
