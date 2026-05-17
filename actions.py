@@ -319,14 +319,99 @@ class Actions:
         self.speak("Abriendo WhatsApp en Chrome.")
         self.log("WhatsApp Web abierto en Chrome existente.")
 
-    def send_whatsapp_message(self, contact: str, message: str) -> bool:
+    # ── WhatsApp helpers ──────────────────────────────────────────────────────
+
+    def _is_whatsapp_app_running(self) -> bool:
+        """Return True if the WhatsApp desktop process is running."""
+        for proc in psutil.process_iter(["name"]):
+            try:
+                if "whatsapp" in proc.info["name"].lower():
+                    return True
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                pass
+        return False
+
+    def _focus_window(self, partial_title: str) -> bool:
+        """Bring a visible window whose title contains *partial_title* to front."""
+        if platform.system() != "Windows":
+            return False
+        try:
+            import ctypes
+            found = [None]
+            EnumProc = ctypes.WINFUNCTYPE(ctypes.c_bool, ctypes.c_int, ctypes.c_int)
+
+            def _cb(hwnd, _):
+                if ctypes.windll.user32.IsWindowVisible(hwnd):
+                    length = ctypes.windll.user32.GetWindowTextLengthW(hwnd)
+                    buf = ctypes.create_unicode_buffer(length + 1)
+                    ctypes.windll.user32.GetWindowTextW(hwnd, buf, length + 1)
+                    if partial_title.lower() in buf.value.lower():
+                        found[0] = hwnd
+                        return False
+                return True
+
+            ctypes.windll.user32.EnumWindows(EnumProc(_cb), 0)
+            if found[0]:
+                ctypes.windll.user32.ShowWindow(found[0], 9)   # SW_RESTORE
+                ctypes.windll.user32.SetForegroundWindow(found[0])
+                return True
+        except Exception as exc:
+            self.log(f"Error buscando ventana '{partial_title}': {exc}", "warning")
+        return False
+
+    def _paste_text(self, text: str) -> None:
+        """Copy *text* to the clipboard and paste it (handles special chars)."""
+        try:
+            import pyperclip
+            pyperclip.copy(text)
+            pyautogui.hotkey("ctrl", "v")
+        except Exception:
+            pyautogui.write(text, interval=0.03)
+
+    def _send_via_whatsapp_app(self, contact: str, message: str) -> bool:
         """
-        Send *message* to *contact* via WhatsApp Web.
-        Reuses an existing Chrome session if one is open.
+        Control the WhatsApp desktop app with pyautogui.
+        Searches for *contact* using Ctrl+N (New Chat / search), opens the
+        conversation, and sends *message* via the clipboard.
         """
         try:
+            # 1. Focus WhatsApp window
+            if not self._focus_window("WhatsApp"):
+                self.log("Ventana de WhatsApp no encontrada.", "warning")
+                return False
+            time.sleep(0.8)
+
+            # 2. Open new-chat / contact search with Ctrl+N
+            pyautogui.hotkey("ctrl", "n")
+            time.sleep(0.6)
+
+            # 3. Type the contact name (use clipboard to avoid encoding issues)
+            self._paste_text(contact)
+            time.sleep(1.5)   # wait for search results
+
+            # 4. Press Enter / Down + Enter to select the first result
+            pyautogui.press("down")
+            time.sleep(0.3)
+            pyautogui.press("enter")
+            time.sleep(0.8)
+
+            # 5. Send message via clipboard
+            self._paste_text(message)
+            time.sleep(0.3)
+            pyautogui.press("enter")
+
+            self.speak(f"Mensaje enviado a {contact} desde la app de WhatsApp.")
+            self.log(f"WhatsApp App → {contact}: {message}", "success")
+            return True
+
+        except Exception as exc:
+            self.log(f"Error controlando WhatsApp App: {exc}", "warning")
+            return False
+
+    def _send_via_whatsapp_web_selenium(self, contact: str, message: str) -> bool:
+        """Send via WhatsApp Web using the persistent Selenium profile."""
+        try:
             with self._driver_lock:
-                # Ensure we have an active driver pointing at WhatsApp
                 if self.chrome_driver is None:
                     driver = self._get_whatsapp_driver()
                     if not driver:
@@ -420,13 +505,37 @@ class Actions:
                 msg_box.send_keys(Keys.ENTER)
 
                 self.speak(f"Mensaje enviado a {contact}.")
-                self.log(f"WhatsApp → {contact}: {message}", "success")
+                self.log(f"WhatsApp Web → {contact}: {message}", "success")
                 return True
 
         except Exception as exc:
-            self.log(f"Error enviando mensaje WhatsApp: {exc}", "error")
+            self.log(f"Error enviando mensaje WhatsApp Web: {exc}", "error")
             self.speak("Hubo un error al intentar enviar el mensaje por WhatsApp.")
             return False
+
+    def send_whatsapp_message(self, contact: str, message: str) -> bool:
+        """
+        Send *message* to *contact* via WhatsApp.
+        Priority:
+          1. WhatsApp desktop app (if the process is running) → pyautogui
+          2. WhatsApp Web via persistent Selenium profile → Selenium
+        """
+        if not contact or not message:
+            self.speak("Necesito saber a quién enviar el mensaje y qué decir.")
+            return False
+
+        # ── 1. WhatsApp desktop app ───────────────────────────────────────────
+        if self._is_whatsapp_app_running():
+            self.log("WhatsApp App detectada. Usando la aplicación.", "info")
+            self.speak(f"Enviando mensaje a {contact} desde la app de WhatsApp.")
+            if self._send_via_whatsapp_app(contact, message):
+                return True
+            self.log("Fallo en la app, intentando con WhatsApp Web.", "warning")
+
+        # ── 2. WhatsApp Web via Selenium (persistent profile) ─────────────────
+        self.log("Usando WhatsApp Web con perfil persistente.", "info")
+        self.speak(f"Abriendo WhatsApp Web para enviar el mensaje a {contact}.")
+        return self._send_via_whatsapp_web_selenium(contact, message)
 
     def play_youtube(self, query: str) -> bool:
         """Open YouTube search in the user's existing Chrome (with their session)."""
