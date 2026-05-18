@@ -65,12 +65,15 @@ INTENTS: dict[str, list[str]] = {
 
     # ── WhatsApp ──────────────────────────────────────────────────────────────
     "send_whatsapp": [
-        r"(?:manda|envia|escribe|dile|contacta)\s+(?:un\s+)?mensaje\s+(?:(?:por\s+)?whatsapp\s+)?a\s+(\w+)\s+(?:que\s+diga|diciendo|con\s+el\s+texto|con)\s+(.+)",
-        r"(?:manda|envia)\s+(?:un\s+)?mensaje\s+a\s+(\w+)\s+(?:por\s+)?whatsapp\s+(?:que\s+diga|diciendo)\s+(.+)",
-        r"whatsapp\s+(?:a\s+)?(\w+)\s+(?:que\s+diga|diciendo|con)\s+(.+)",
-        r"(?:dile|escribele)\s+a\s+(\w+)\s+(?:por\s+whatsapp\s+)?(?:que\s+)?(.+)",
-        r"(?:manda|envia)\s+a\s+(\w+)\s+(?:por\s+whatsapp\s+)?(?:que\s+diga\s+|el\s+mensaje\s+)?(.+)",
-        r"mensaje\s+a\s+(\w+)\s+(?:diciendo|que\s+diga|con)\s+(.+)",
+        # With explicit delimiter — multi-word contact names supported (lazy match)
+        r"(?:manda|envia|escribe|dile|contacta)\s+(?:un\s+)?mensaje\s+(?:(?:por\s+)?whatsapp\s+)?a\s+(\w+(?:\s+\w+)*?)\s+(?:que\s+diga|diciendo|con\s+el\s+texto|con)\s+(.+)",
+        r"(?:manda|envia)\s+(?:un\s+)?mensaje\s+a\s+(\w+(?:\s+\w+)*?)\s+(?:por\s+)?whatsapp\s+(?:que\s+diga|diciendo)\s+(.+)",
+        r"whatsapp\s+(?:a\s+)?(\w+(?:\s+\w+)*?)\s+(?:que\s+diga|diciendo|con)\s+(.+)",
+        r"(?:dile|escribele)\s+a\s+(\w+(?:\s+\w+)*?)\s+(?:por\s+whatsapp\s+)?(?:que\s+)?(.+)",
+        r"(?:manda|envia)\s+a\s+(\w+(?:\s+\w+)*?)\s+(?:por\s+whatsapp\s+)?(?:que\s+diga\s+|el\s+mensaje\s+)?(.+)",
+        r"mensaje\s+a\s+(\w+(?:\s+\w+)*?)\s+(?:diciendo|que\s+diga|con)\s+(.+)",
+        # Without delimiter: "manda un mensaje a {contact} {message}" (contact = first word)
+        r"(?:manda|envia)\s+(?:un\s+)?mensaje\s+(?:(?:por\s+)?whatsapp\s+)?a\s+(\w+)\s+(.+)",
     ],
     "open_whatsapp_chrome": [
         r"abre?\s+whatsapp\s+(?:en\s+)?(?:chrome|el\s+navegador)",

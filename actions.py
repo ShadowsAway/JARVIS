@@ -482,15 +482,23 @@ class Actions:
             user32.SetForegroundWindow(hwnd)
         time.sleep(1.0)
 
-        # 4. Click the search box.
-        # Maximised Chrome window starts at (0, 0).  Layout reference:
+        # 4. Get actual window bounds — works on any monitor (primary or secondary).
+        #    After SW_MAXIMIZE the window fills its monitor; rect reflects that.
+        rect = ctypes.wintypes.RECT()
+        user32.GetWindowRect(hwnd, ctypes.byref(rect))
+        wx = rect.left
+        wy = rect.top
+        ww = rect.right - rect.left
+        wh = rect.bottom - rect.top
+
+        # Click the search box.
+        # WhatsApp Web layout (relative to window top-left):
         #   Chrome tabs + address bar  ~ 85 px
-        #   WhatsApp top header        ~ 62 px
-        #   Navigation strip (Chats…)  ~ 52 px
-        #   Search input centre        ~ 220 px from window top
-        # X: well inside the left sidebar (~ 200 px in).
-        search_x = 220
-        search_y = 220
+        #   WhatsApp header            ~ 62 px
+        #   Navigation strip (Chats…)  ~ 52 px  → search input at ~220 px
+        # X: inside the left sidebar (~220 px from window left).
+        search_x = wx + 220
+        search_y = wy + 220
         pyautogui.click(search_x, search_y)
         time.sleep(0.6)
 
@@ -507,11 +515,9 @@ class Actions:
         pyautogui.press("enter")
         time.sleep(1.5)
 
-        # 6. Focus the message input box explicitly, then paste & send.
-        #    The compose box is in the bottom-right area of the screen.
-        screen_w, screen_h = pyautogui.size()
-        msg_x = int(screen_w * 0.55)
-        msg_y = screen_h - 80
+        # 6. Focus the message input box (compose area, bottom-right of window).
+        msg_x = wx + int(ww * 0.55)
+        msg_y = wy + wh - 80
         pyautogui.click(msg_x, msg_y)
         time.sleep(0.5)
         self._paste_text(message)
