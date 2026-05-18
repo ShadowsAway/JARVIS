@@ -132,6 +132,22 @@ PHONETIC_MULTIWORD: dict[str, str] = {
     "es pot if ai": "spotify",
 }
 
+# ── Contact name aliases ──────────────────────────────────────────────────────
+# Vosk (Spanish model) hears Catalan/Spanish names and outputs their English
+# equivalents.  These corrections apply ONLY to the WhatsApp contact search.
+# Add any name that Vosk gets wrong for your contacts.
+CONTACT_NAME_ALIASES: dict[str, str] = {
+    "andrew":  "andreu",   # Catalan: Andreu → Vosk hears: andrew
+    "mark":    "marc",     # Catalan: Marc   → Vosk hears: mark
+    "paul":    "pau",      # Catalan: Pau    → Vosk hears: paul
+    "peter":   "pere",     # Catalan: Pere   → Vosk hears: peter
+    "john":    "joan",     # Catalan: Joan   → Vosk hears: john
+    "james":   "jaume",    # Catalan: Jaume  → Vosk hears: james
+    "george":  "jordi",    # Catalan: Jordi  → Vosk hears: george
+    "raymond": "ramon",    # Catalan: Ramon  → Vosk hears: raymond
+    "matthew": "mateu",    # Catalan: Mateu  → Vosk hears: matthew
+}
+
 # ── GUI Color Palette (Iron Man / HUD aesthetic) ───────────────────────────────
 BG       = "#050a14"   # Deep space black-blue  (background)
 ACCENT   = "#00d4ff"   # Electric cyan           (primary accent)
