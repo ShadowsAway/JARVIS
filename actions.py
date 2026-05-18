@@ -418,6 +418,17 @@ class Actions:
             self.log(f"Error controlando WhatsApp App: {exc}", "warning")
             return False
 
+    def _wa_find(self, driver, selectors: list, timeout: float = 3) -> object:
+        """Try each (By, xpath) selector with a short timeout; return first match."""
+        for by, xpath in selectors:
+            try:
+                return WebDriverWait(driver, timeout).until(
+                    EC.element_to_be_clickable((by, xpath))
+                )
+            except (TimeoutException, NoSuchElementException):
+                continue
+        return None
+
     def _send_via_selenium_whatsapp(self, contact: str, message: str) -> bool:
         """
         Send a WhatsApp message via Selenium DOM interaction.
@@ -430,150 +441,128 @@ class Actions:
             return False
 
         try:
-            wait       = WebDriverWait(driver, 30)
-            short_wait = WebDriverWait(driver, 6)
-
-            # ── Navigate to WhatsApp Web if not already there ─────────────────
+            # ── Navigate to WhatsApp Web ──────────────────────────────────────
+            self.log("Abriendo WhatsApp Web…", "dim")
             if "web.whatsapp.com" not in driver.current_url:
                 driver.get("https://web.whatsapp.com")
-                time.sleep(2)
+                time.sleep(3)
 
-            # ── Detect QR scan requirement ────────────────────────────────────
-            qr_elements = driver.find_elements(
-                By.XPATH,
-                '//*[@data-testid="qrcode"] | //canvas[@aria-label]',
+            # ── Detect QR scan (check before waiting for chat-list) ───────────
+            qr = driver.find_elements(By.XPATH,
+                '//*[@data-testid="qrcode"]'
+                ' | //canvas[contains(@aria-label,"QR")]'
+                ' | //canvas[contains(@aria-label,"qr")]'
             )
-            if qr_elements:
+            if qr:
                 self.speak(
-                    "Necesitas escanear el código QR para iniciar sesión en WhatsApp. "
-                    "Escanea el código que aparece en el navegador."
+                    "Necesitas escanear el código QR para iniciar sesión en "
+                    "WhatsApp. Escanea el código en la ventana del navegador."
                 )
-                self.log("WhatsApp Web: escanea el QR — esperando hasta 90 segundos…", "warning")
+                self.log("WhatsApp Web — escanea el QR. Esperando hasta 90 s…", "warning")
                 try:
                     WebDriverWait(driver, 90).until(
                         EC.presence_of_element_located(
-                            (By.XPATH, '//div[@data-testid="chat-list"]')
+                            (By.XPATH, '//div[@id="side"]')
                         )
                     )
                 except TimeoutException:
                     self.log("Tiempo de espera del QR agotado.", "error")
                     return False
 
-            # ── Wait for the chat list (app fully loaded) ─────────────────────
+            # ── Wait for the sidebar (app ready) ──────────────────────────────
+            self.log("Esperando que cargue WhatsApp Web…", "dim")
             try:
-                wait.until(
-                    EC.presence_of_element_located(
-                        (By.XPATH, '//div[@data-testid="chat-list"]')
-                    )
+                WebDriverWait(driver, 30).until(
+                    EC.presence_of_element_located((By.XPATH, '//div[@id="side"]'))
                 )
             except TimeoutException:
-                self.log("WhatsApp Web no cargó a tiempo.", "error")
-                return False
-
-            time.sleep(0.5)
-
-            # ── Find the search box ───────────────────────────────────────────
-            search_box = None
-            for xpath in (
-                '//div[@data-testid="chat-list-search"]//div[@contenteditable="true"]',
-                '//div[@data-tab="3"][@contenteditable="true"]',
-                '//div[@role="textbox"][contains(@aria-label,"Buscar")]',
-                '//div[@role="textbox"][contains(@aria-label,"Search")]',
-            ):
-                try:
-                    search_box = wait.until(
-                        EC.element_to_be_clickable((By.XPATH, xpath))
-                    )
-                    break
-                except (TimeoutException, NoSuchElementException):
-                    continue
-
-            if search_box is None:
-                self.log("No se encontró la barra de búsqueda de WhatsApp.", "error")
-                return False
-
-            search_box.click()
-            time.sleep(0.2)
-            search_box.send_keys(Keys.CONTROL + "a")
-            search_box.send_keys(Keys.DELETE)
-            time.sleep(0.1)
-            search_box.send_keys(contact)
-            time.sleep(2.0)   # wait for search results to populate
-
-            # ── Click the matching contact ────────────────────────────────────
-            contact_found = False
-            # 1. Exact title attribute match (most reliable)
-            for title_val in (contact, contact.capitalize(), contact.title()):
-                try:
-                    el = short_wait.until(
-                        EC.element_to_be_clickable(
-                            (By.XPATH, f'//span[@title="{title_val}"]')
-                        )
-                    )
-                    el.click()
-                    contact_found = True
-                    break
-                except (TimeoutException, NoSuchElementException):
-                    continue
-
-            # 2. Partial title match (handles "Andreu García" when we search "andreu")
-            if not contact_found:
-                try:
-                    el = short_wait.until(
-                        EC.element_to_be_clickable(
-                            (By.XPATH,
-                             f'//span[contains(translate(@title,"ABCDEFGHIJKLMNOPQRSTUVWXYZ",'
-                             f'"abcdefghijklmnopqrstuvwxyz"),"{contact.lower()}")]')
-                        )
-                    )
-                    el.click()
-                    contact_found = True
-                except (TimeoutException, NoSuchElementException):
-                    pass
-
-            # 3. First result in the list
-            if not contact_found:
-                try:
-                    el = short_wait.until(
-                        EC.element_to_be_clickable(
-                            (By.XPATH, '(//div[@data-testid="cell-frame-container"])[1]')
-                        )
-                    )
-                    el.click()
-                    contact_found = True
-                except (TimeoutException, NoSuchElementException):
-                    pass
-
-            if not contact_found:
-                self.speak(f"No encontré el contacto {contact} en WhatsApp.")
-                self.log(f"Contacto no encontrado: {contact}", "warning")
-                search_box.send_keys(Keys.ESCAPE)
+                self.log("WhatsApp Web no respondió a tiempo.", "error")
+                self.speak("WhatsApp Web tardó demasiado en cargar.")
                 return False
 
             time.sleep(1.0)
 
-            # ── Find the message input and send ───────────────────────────────
-            msg_box = None
-            for xpath in (
-                '//div[@data-testid="conversation-compose-box-input"]',
-                '//div[@data-tab="10"][@contenteditable="true"]',
-                '//footer//div[@contenteditable="true"]',
-                '//div[contains(@aria-label,"mensaje")][@contenteditable="true"]',
-                '//div[contains(@aria-label,"message")][@contenteditable="true"]',
-                '//div[contains(@aria-label,"Message")][@contenteditable="true"]',
-            ):
-                try:
-                    msg_box = WebDriverWait(driver, 10).until(
-                        EC.element_to_be_clickable((By.XPATH, xpath))
-                    )
-                    break
-                except (TimeoutException, NoSuchElementException):
-                    continue
+            # ── Find the search / new-chat input ──────────────────────────────
+            # data-tab="3" is the search box in every known WhatsApp Web version.
+            # Title attribute is used as fallback (language-independent).
+            self.log("Buscando la caja de búsqueda…", "dim")
+            search_box = self._wa_find(driver, [
+                (By.CSS_SELECTOR, 'div[data-tab="3"][contenteditable="true"]'),
+                (By.XPATH,        '//div[@data-tab="3"][@contenteditable="true"]'),
+                (By.XPATH,        '//div[@title="Buscar o empezar un chat nuevo"]'),
+                (By.XPATH,        '//div[@title="Search or start new chat"]'),
+                (By.XPATH,        '//div[@id="side"]//div[@contenteditable="true"][1]'),
+            ], timeout=5)
 
-            if msg_box is None:
-                self.log("No se encontró el campo de texto del mensaje.", "error")
+            if search_box is None:
+                # Last resort: use JavaScript to find the first contenteditable in the sidebar
+                try:
+                    search_box = driver.execute_script(
+                        "return document.querySelector('#side div[contenteditable]');"
+                    )
+                except Exception:
+                    pass
+
+            if search_box is None:
+                self.log("No se encontró la barra de búsqueda de WhatsApp.", "error")
+                self.speak("No pude acceder al buscador de WhatsApp.")
                 return False
 
+            self.log(f"Escribiendo contacto: {contact}", "dim")
+            search_box.click()
+            time.sleep(0.3)
+            search_box.send_keys(Keys.CONTROL + "a")
+            time.sleep(0.1)
+            search_box.send_keys(Keys.DELETE)
+            time.sleep(0.1)
+            search_box.send_keys(contact)
+            time.sleep(2.5)   # wait for results
+
+            # ── Select the first matching contact ─────────────────────────────
+            # Primary: keyboard Down + Enter (works regardless of DOM structure)
+            self.log("Seleccionando contacto…", "dim")
+            search_box.send_keys(Keys.ARROW_DOWN)
+            time.sleep(0.4)
+            search_box.send_keys(Keys.ENTER)
+            time.sleep(1.5)
+
+            # Verify a chat opened (message box should now be present)
+            msg_box = self._wa_find(driver, [
+                (By.CSS_SELECTOR, 'div[data-tab="10"][contenteditable="true"]'),
+                (By.XPATH,        '//div[@data-tab="10"][@contenteditable="true"]'),
+                (By.XPATH,        '//div[@data-testid="conversation-compose-box-input"]'),
+                (By.XPATH,        '//footer//div[@contenteditable="true"]'),
+                (By.XPATH,        '//div[@contenteditable="true"][@spellcheck="true"]'),
+            ], timeout=6)
+
+            # If keyboard navigation didn't open a chat, try clicking first DOM result
+            if msg_box is None:
+                self.log("Intentando clic en primer resultado…", "dim")
+                result = self._wa_find(driver, [
+                    (By.XPATH, '(//div[@data-testid="cell-frame-container"])[1]'),
+                    (By.XPATH, '(//div[@role="listitem"])[1]'),
+                    (By.XPATH, f'//span[@title="{contact.capitalize()}"]'),
+                    (By.XPATH, f'//span[contains(translate(@title,'
+                               f'"ABCDEFGHIJKLMNOPQRSTUVWXYZ","abcdefghijklmnopqrstuvwxyz"),'
+                               f'"{contact.lower()}")]'),
+                ], timeout=4)
+                if result:
+                    result.click()
+                    time.sleep(1.5)
+                    msg_box = self._wa_find(driver, [
+                        (By.CSS_SELECTOR, 'div[data-tab="10"][contenteditable="true"]'),
+                        (By.XPATH,        '//div[@data-tab="10"][@contenteditable="true"]'),
+                        (By.XPATH,        '//div[@data-testid="conversation-compose-box-input"]'),
+                        (By.XPATH,        '//footer//div[@contenteditable="true"]'),
+                    ], timeout=6)
+
+            if msg_box is None:
+                self.speak(f"No encontré el chat de {contact} en WhatsApp.")
+                self.log(f"No se abrió el chat de {contact}.", "warning")
+                return False
+
+            # ── Type and send the message ─────────────────────────────────────
+            self.log("Enviando mensaje…", "dim")
             msg_box.click()
             time.sleep(0.2)
             msg_box.send_keys(message)
