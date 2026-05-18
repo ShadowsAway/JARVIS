@@ -430,64 +430,92 @@ class Actions:
     def _send_via_existing_chrome_whatsapp(self, contact: str, message: str) -> bool:
         """
         Send a WhatsApp message using the user's real Chrome session.
-        Opens web.whatsapp.com in a new tab (user is already logged in),
-        then controls the interface with pyautogui — no Selenium, no new profiles.
+        - Reuses an already-open WhatsApp Web tab when possible.
+        - Maximises Chrome so the click coordinates are deterministic.
+        - Never opens a new Selenium-controlled browser.
         """
         import ctypes
         import ctypes.wintypes
 
-        # Open WhatsApp Web in the user's existing Chrome (new tab, their session)
-        self._open_url_in_existing_chrome("https://web.whatsapp.com")
-        self.log("Esperando que cargue WhatsApp Web…", "dim")
-        time.sleep(5)
+        user32 = ctypes.windll.user32
+        SW_MAXIMIZE = 3
+        SW_RESTORE  = 9
 
-        # Find the Chrome window whose tab title is now "WhatsApp"
+        # 1. Look for an existing Chrome window whose active tab is WhatsApp.
         hwnd = self._get_window_hwnd("WhatsApp")
+
+        # 2. Only open a new tab if we did not find one already.
         if not hwnd:
-            self.speak("No encontré la ventana de WhatsApp en Chrome.")
-            return False
+            self.log("WhatsApp Web no detectada en ninguna pestaña activa, abriéndola…", "dim")
+            self._open_url_in_existing_chrome("https://web.whatsapp.com")
+            # Poll until a WhatsApp tab shows up (title updates after load)
+            for _ in range(25):
+                time.sleep(0.5)
+                hwnd = self._get_window_hwnd("WhatsApp")
+                if hwnd:
+                    break
+            if not hwnd:
+                self.speak("No pude encontrar WhatsApp Web en Chrome.")
+                return False
+            time.sleep(3)  # extra time for the UI to finish loading
+        else:
+            self.log("WhatsApp Web ya abierto en Chrome, reutilizando la pestaña.", "info")
 
-        # Get window position and size
-        rect = ctypes.wintypes.RECT()
-        ctypes.windll.user32.GetWindowRect(hwnd, ctypes.byref(rect))
-        wx, wy = rect.left, rect.top
-        w  = rect.right  - rect.left
-        h  = rect.bottom - rect.top
-
-        # Focus window
-        ctypes.windll.user32.ShowWindow(hwnd, 9)
-        ctypes.windll.user32.SetForegroundWindow(hwnd)
-        time.sleep(0.8)
-
-        # ── Click the search box ──────────────────────────────────────────────
-        # WhatsApp Web layout: left sidebar ≈ first 30 % of width.
-        # The search input sits ≈ 55 px below the content area which starts
-        # ≈ 85 px from the very top of the Chrome window (tabs + address bar).
-        chrome_bar_h = 85
-        search_x = wx + int(w * 0.15)
-        search_y = wy + chrome_bar_h + 55
-        pyautogui.click(search_x, search_y)
-        time.sleep(0.5)
-
-        # Clear whatever is there and type the contact name
-        pyautogui.hotkey("ctrl", "a")
-        self._paste_text(contact)
-        time.sleep(2.0)          # wait for search results to appear
-
-        # ── Select the first result ───────────────────────────────────────────
-        pyautogui.press("down")
-        time.sleep(0.3)
-        pyautogui.press("enter")
+        # 3. Restore if minimised, then maximise for consistent geometry.
+        if user32.IsIconic(hwnd):
+            user32.ShowWindow(hwnd, SW_RESTORE)
+            time.sleep(0.4)
+        user32.ShowWindow(hwnd, SW_MAXIMIZE)
+        time.sleep(0.4)
+        # Bring to foreground (focus-stealing trick using AttachThreadInput)
+        try:
+            fg = user32.GetForegroundWindow()
+            cur_t = ctypes.windll.kernel32.GetCurrentThreadId()
+            tgt_t = user32.GetWindowThreadProcessId(fg, None)
+            if cur_t != tgt_t:
+                user32.AttachThreadInput(cur_t, tgt_t, True)
+                user32.SetForegroundWindow(hwnd)
+                user32.AttachThreadInput(cur_t, tgt_t, False)
+            else:
+                user32.SetForegroundWindow(hwnd)
+        except Exception:
+            user32.SetForegroundWindow(hwnd)
         time.sleep(1.0)
 
-        # ── Click the message input box and send ──────────────────────────────
-        # Message input is in the bottom-right of the window
-        msg_x = wx + int(w * 0.65)
-        msg_y = wy + h - 50
+        # 4. Click the search box.
+        # Maximised Chrome window starts at (0, 0).  Layout reference:
+        #   Chrome tabs + address bar  ~ 85 px
+        #   WhatsApp top header        ~ 62 px
+        #   Navigation strip (Chats…)  ~ 52 px
+        #   Search input centre        ~ 220 px from window top
+        # X: well inside the left sidebar (~ 200 px in).
+        search_x = 220
+        search_y = 220
+        pyautogui.click(search_x, search_y)
+        time.sleep(0.6)
+
+        # Clear anything that might be in the search box, then paste contact
+        pyautogui.hotkey("ctrl", "a")
+        time.sleep(0.2)
+        pyautogui.press("delete")
+        time.sleep(0.2)
+        self._paste_text(contact)
+        time.sleep(2.5)  # wait for search results to populate
+
+        # 5. Open the first contact in the result list (Enter on the search
+        #    box opens the first matching chat in WhatsApp Web).
+        pyautogui.press("enter")
+        time.sleep(1.5)
+
+        # 6. Focus the message input box explicitly, then paste & send.
+        #    The compose box is in the bottom-right area of the screen.
+        screen_w, screen_h = pyautogui.size()
+        msg_x = int(screen_w * 0.55)
+        msg_y = screen_h - 80
         pyautogui.click(msg_x, msg_y)
-        time.sleep(0.3)
+        time.sleep(0.5)
         self._paste_text(message)
-        time.sleep(0.3)
+        time.sleep(0.4)
         pyautogui.press("enter")
 
         self.speak(f"Mensaje enviado a {contact}.")
