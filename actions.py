@@ -408,117 +408,98 @@ class Actions:
             self.log(f"Error controlando WhatsApp App: {exc}", "warning")
             return False
 
-    def _send_via_whatsapp_web_selenium(self, contact: str, message: str) -> bool:
-        """Send via WhatsApp Web using the persistent Selenium profile."""
-        try:
-            with self._driver_lock:
-                if self.chrome_driver is None:
-                    driver = self._get_whatsapp_driver()
-                    if not driver:
-                        self.speak("No pude abrir Chrome para WhatsApp.")
-                        return False
-                    self.chrome_driver = driver
-
-                driver = self.chrome_driver
-
-                if "web.whatsapp.com" not in driver.current_url:
-                    driver.get("https://web.whatsapp.com")
-                    self.speak("Abriendo WhatsApp, espera un momento.")
-                    time.sleep(6)
-
-                wait = WebDriverWait(driver, 30)
-
-                # ── Find the search box ───────────────────────────────────────
-                search_selectors = [
-                    (By.XPATH, "//div[@data-testid='chat-list-search']//div[@contenteditable='true']"),
-                    (By.XPATH, "//div[@role='textbox'][@title='Buscar o empezar un nuevo chat']"),
-                    (By.XPATH, "//div[contains(@class,'copyable-text selectable-text')][@data-tab='3']"),
-                ]
-                search_box = None
-                for by, selector in search_selectors:
-                    try:
-                        search_box = wait.until(
-                            EC.presence_of_element_located((by, selector))
-                        )
-                        break
-                    except TimeoutException:
-                        continue
-
-                if search_box is None:
-                    self.speak(
-                        "WhatsApp no ha cargado todavía. Por favor escanea el código QR primero."
-                    )
+    def _get_window_hwnd(self, partial_title: str):
+        """Return hwnd of the first visible window whose title contains partial_title."""
+        if platform.system() != "Windows":
+            return None
+        import ctypes
+        found = [None]
+        EnumProc = ctypes.WINFUNCTYPE(ctypes.c_bool, ctypes.c_int, ctypes.c_int)
+        def cb(hwnd, _):
+            if ctypes.windll.user32.IsWindowVisible(hwnd):
+                n = ctypes.windll.user32.GetWindowTextLengthW(hwnd)
+                buf = ctypes.create_unicode_buffer(n + 1)
+                ctypes.windll.user32.GetWindowTextW(hwnd, buf, n + 1)
+                if partial_title.lower() in buf.value.lower():
+                    found[0] = hwnd
                     return False
+            return True
+        ctypes.windll.user32.EnumWindows(EnumProc(cb), 0)
+        return found[0]
 
-                search_box.click()
-                time.sleep(0.4)
-                # Clear any existing text
-                search_box.send_keys(Keys.CONTROL + "a")
-                search_box.send_keys(Keys.DELETE)
-                search_box.send_keys(contact)
-                time.sleep(2)
+    def _send_via_existing_chrome_whatsapp(self, contact: str, message: str) -> bool:
+        """
+        Send a WhatsApp message using the user's real Chrome session.
+        Opens web.whatsapp.com in a new tab (user is already logged in),
+        then controls the interface with pyautogui — no Selenium, no new profiles.
+        """
+        import ctypes
+        import ctypes.wintypes
 
-                # ── Click on the contact ──────────────────────────────────────
-                try:
-                    contact_elem = wait.until(
-                        EC.presence_of_element_located(
-                            (By.XPATH, f"//span[@title='{contact}']")
-                        )
-                    )
-                    contact_elem.click()
-                except TimeoutException:
-                    # Fall back to clicking the first search result
-                    try:
-                        first_result = driver.find_element(
-                            By.XPATH, "//div[@data-testid='cell-frame-container']"
-                        )
-                        first_result.click()
-                    except NoSuchElementException:
-                        self.speak(f"No encontré el contacto {contact} en WhatsApp.")
-                        return False
+        # Open WhatsApp Web in the user's existing Chrome (new tab, their session)
+        self._open_url_in_existing_chrome("https://web.whatsapp.com")
+        self.log("Esperando que cargue WhatsApp Web…", "dim")
+        time.sleep(5)
 
-                time.sleep(1)
-
-                # ── Type and send the message ─────────────────────────────────
-                msg_selectors = [
-                    (By.XPATH, "//div[@data-testid='conversation-compose-box-input']"),
-                    (By.XPATH, "//div[@role='textbox'][@data-tab='10']"),
-                    (By.XPATH, "//div[contains(@class,'copyable-text')][@contenteditable='true'][@data-tab='10']"),
-                ]
-                msg_box = None
-                for by, selector in msg_selectors:
-                    try:
-                        msg_box = wait.until(
-                            EC.presence_of_element_located((by, selector))
-                        )
-                        break
-                    except TimeoutException:
-                        continue
-
-                if msg_box is None:
-                    self.speak("No pude encontrar el cuadro de mensaje en WhatsApp.")
-                    return False
-
-                msg_box.click()
-                msg_box.send_keys(message)
-                time.sleep(0.4)
-                msg_box.send_keys(Keys.ENTER)
-
-                self.speak(f"Mensaje enviado a {contact}.")
-                self.log(f"WhatsApp Web → {contact}: {message}", "success")
-                return True
-
-        except Exception as exc:
-            self.log(f"Error enviando mensaje WhatsApp Web: {exc}", "error")
-            self.speak("Hubo un error al intentar enviar el mensaje por WhatsApp.")
+        # Find the Chrome window whose tab title is now "WhatsApp"
+        hwnd = self._get_window_hwnd("WhatsApp")
+        if not hwnd:
+            self.speak("No encontré la ventana de WhatsApp en Chrome.")
             return False
+
+        # Get window position and size
+        rect = ctypes.wintypes.RECT()
+        ctypes.windll.user32.GetWindowRect(hwnd, ctypes.byref(rect))
+        wx, wy = rect.left, rect.top
+        w  = rect.right  - rect.left
+        h  = rect.bottom - rect.top
+
+        # Focus window
+        ctypes.windll.user32.ShowWindow(hwnd, 9)
+        ctypes.windll.user32.SetForegroundWindow(hwnd)
+        time.sleep(0.8)
+
+        # ── Click the search box ──────────────────────────────────────────────
+        # WhatsApp Web layout: left sidebar ≈ first 30 % of width.
+        # The search input sits ≈ 55 px below the content area which starts
+        # ≈ 85 px from the very top of the Chrome window (tabs + address bar).
+        chrome_bar_h = 85
+        search_x = wx + int(w * 0.15)
+        search_y = wy + chrome_bar_h + 55
+        pyautogui.click(search_x, search_y)
+        time.sleep(0.5)
+
+        # Clear whatever is there and type the contact name
+        pyautogui.hotkey("ctrl", "a")
+        self._paste_text(contact)
+        time.sleep(2.0)          # wait for search results to appear
+
+        # ── Select the first result ───────────────────────────────────────────
+        pyautogui.press("down")
+        time.sleep(0.3)
+        pyautogui.press("enter")
+        time.sleep(1.0)
+
+        # ── Click the message input box and send ──────────────────────────────
+        # Message input is in the bottom-right of the window
+        msg_x = wx + int(w * 0.65)
+        msg_y = wy + h - 50
+        pyautogui.click(msg_x, msg_y)
+        time.sleep(0.3)
+        self._paste_text(message)
+        time.sleep(0.3)
+        pyautogui.press("enter")
+
+        self.speak(f"Mensaje enviado a {contact}.")
+        self.log(f"WhatsApp Web → {contact}: {message}", "success")
+        return True
 
     def send_whatsapp_message(self, contact: str, message: str) -> bool:
         """
         Send *message* to *contact* via WhatsApp.
         Priority:
-          1. WhatsApp desktop app (if the process is running) → pyautogui
-          2. WhatsApp Web via persistent Selenium profile → Selenium
+          1. WhatsApp desktop app (if running) → pyautogui on the app window
+          2. WhatsApp Web in the user's own Chrome → pyautogui (no Selenium)
         """
         if not contact or not message:
             self.speak("Necesito saber a quién enviar el mensaje y qué decir.")
@@ -527,15 +508,15 @@ class Actions:
         # ── 1. WhatsApp desktop app ───────────────────────────────────────────
         if self._is_whatsapp_app_running():
             self.log("WhatsApp App detectada. Usando la aplicación.", "info")
-            self.speak(f"Enviando mensaje a {contact} desde la app de WhatsApp.")
+            self.speak(f"Enviando mensaje a {contact} desde WhatsApp.")
             if self._send_via_whatsapp_app(contact, message):
                 return True
             self.log("Fallo en la app, intentando con WhatsApp Web.", "warning")
 
-        # ── 2. WhatsApp Web via Selenium (persistent profile) ─────────────────
-        self.log("Usando WhatsApp Web con perfil persistente.", "info")
-        self.speak(f"Abriendo WhatsApp Web para enviar el mensaje a {contact}.")
-        return self._send_via_whatsapp_web_selenium(contact, message)
+        # ── 2. WhatsApp Web in the user's real Chrome ─────────────────────────
+        self.log("Usando WhatsApp Web en tu Chrome.", "info")
+        self.speak(f"Buscando a {contact} en WhatsApp Web.")
+        return self._send_via_existing_chrome_whatsapp(contact, message)
 
     def play_youtube(self, query: str) -> bool:
         """Open YouTube search in the user's existing Chrome (with their session)."""
